@@ -44,16 +44,12 @@ async function checkWeather() {
         if (alertTriggered) {
             const currentTemp = upcomingForecasts[0].main.temp;
             const finalMessage = `🚨 *Weather Alert: Bikrampur, Bankura* 🚨\n\nConditions expected:\n${alertMessage}\n🌡️ Current Temp: ${currentTemp}°C\n\n_Stay safe!_`;
-            
+
             await sendTelegramMessage(finalMessage);
             console.log("Alert sent successfully.");
         } else {
-            // FORCING A TEST MESSAGE TO TELEGRAM
-            const currentTemp = upcomingForecasts[0].main.temp;
-            const testMessage = `🤖 *Test Message:* Your weather bot is connected perfectly!\n\nThe sky over Bikrampur is currently clear (Temp: ${currentTemp}°C). I will stay quiet until I spot rain!`;
-            
-            await sendTelegramMessage(testMessage);
-            console.log("Weather is clear. Test message sent to Telegram.");
+            // IT IS NOW SILENT AGAIN. No spam!
+            console.log("Weather is clear. No alert needed.");
         }
 
     } catch (error) {
