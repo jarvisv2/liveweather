@@ -1,6 +1,5 @@
 // api/bot.js
 export default async function handler(req, res) {
-    // Only accept POST requests from Telegram
     if (req.method !== 'POST') {
         return res.status(200).send('OK');
     }
@@ -9,28 +8,32 @@ export default async function handler(req, res) {
     const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
     const body = req.body;
 
-    // Check if the message contains text
     if (body.message && body.message.text) {
         const text = body.message.text;
         const chatId = body.message.chat.id;
 
-        // If someone types /weather
-        if (text === '/weather' || text === '/weather@YOUR_BOT_USERNAME') {
-            
-            // Bikrampur Coordinates
+        if (text.startsWith('/weather')) {
             const LAT = '22.9238'; 
             const LON = '87.0427';
-            const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${WEATHER_API_KEY}&units=metric`;
+            
+            // We changed this from 'weather' to 'forecast' so we can see the Rain Chance!
+            const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${WEATHER_API_KEY}&units=metric`;
 
             try {
-                const response = await fetch(weatherUrl);
+                const response = await fetch(forecastUrl);
                 const data = await response.json();
                 
-                const currentTemp = data.main.temp;
-                const desc = data.weather[0].description;
-                const replyText = `📍 *Current Weather in Bikrampur:*\n🌡️ Temp: ${currentTemp}°C\n☁️ Condition: ${desc}`;
+                // Get the data for the next 3 hours
+                const forecast = data.list[0];
+                const currentTemp = forecast.main.temp;
+                const desc = forecast.weather[0].description;
+                const rainChance = Math.round((forecast.pop || 0) * 100); 
+                
+                // Convert wind speed from m/s to km/h
+                const windSpeed = Math.round(forecast.wind.speed * 3.6); 
 
-                // Send reply to Telegram
+                const replyText = `📍 *Bikrampur Weather Outlook:*\n🌡️ Temp: ${currentTemp}°C\n☁️ Condition: ${desc.toUpperCase()}\n🌧️ Rain Chance: ${rainChance}%\n💨 Wind: ${windSpeed} km/h`;
+
                 await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -46,7 +49,5 @@ export default async function handler(req, res) {
             }
         }
     }
-    
-    // Always return 200 OK to Telegram
     return res.status(200).send('OK');
 }
