@@ -22,11 +22,14 @@ async function checkWeather() {
         let alertMessage = "";
         let alertTriggered = false;
 
-        for (const forecast of upcomingForecasts) {
+            for (const forecast of upcomingForecasts) {
             const weatherId = forecast.weather[0].id;
             const weatherDesc = forecast.weather[0].description;
             
-            // Format time to Indian Standard Time (IST)
+            // POP is Probability of Precipitation (0.0 to 1.0)
+            // Multiply by 100 to get a percentage
+            const rainChance = Math.round((forecast.pop || 0) * 100); 
+            
             const time = new Date(forecast.dt * 1000).toLocaleString('en-IN', { 
                 timeZone: 'Asia/Kolkata',
                 weekday: 'short', 
@@ -34,10 +37,10 @@ async function checkWeather() {
                 minute: '2-digit' 
             });
 
-            // OpenWeatherMap IDs: 2xx (Thunderstorm), 3xx (Drizzle), 5xx (Rain), 6xx (Snow), 7xx (Severe Atmosphere)
-            if (weatherId < 800) {
+            // TRIGGER IF: Weather ID is rain/storm OR Rain Chance is 30% or higher
+            if (weatherId < 800 || rainChance >= 30) {
                 alertTriggered = true;
-                alertMessage += `• ${time}: ⚠️ *${weatherDesc.toUpperCase()}*\n`;
+                alertMessage += `• ${time}: ⚠️ *${weatherDesc.toUpperCase()}* (Rain Chance: ${rainChance}%)\n`;
             }
         }
 
