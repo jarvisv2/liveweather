@@ -1,57 +1,73 @@
-// index.js
 const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// Pinpoint Coordinates for Bikrampur/Simlapal, Bankura, WB
 const LAT = '22.9238'; 
 const LON = '87.0427';
-const URL = `https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${WEATHER_API_KEY}&units=metric`;
+// days=2 so we can look ahead into tomorrow, alerts=yes grabs government warnings
+const URL = `https://api.weatherapi.com/v1/forecast.json?key=${WEATHER_API_KEY}&q=${LAT},${LON}&days=2&alerts=yes`;
 
 async function checkWeather() {
     try {
         const response = await fetch(URL);
         const data = await response.json();
 
-        if (data.cod !== "200") {
-            throw new Error(`Weather API Error: ${data.message}`);
+        if (data.error) {
+            throw new Error(data.error.message);
         }
 
-        // Check the next 12 hours (4 forecast periods of 3 hours each)
-        const upcomingForecasts = data.list.slice(0, 4);
-        let alertMessage = "";
         let alertTriggered = false;
+        let finalMessage = `🚨 *Weather Alert: Bikrampur, Bankura* 🚨\n\n`;
 
-            for (const forecast of upcomingForecasts) {
-            const weatherId = forecast.weather[0].id;
-            const weatherDesc = forecast.weather[0].description;
+        // 1. CHECK FOR OFFICIAL GOVERNMENT ALERTS (IMD / SDMA)
+        if (data.alerts && data.alerts.alert && data.alerts.alert.length > 0) {
+            alertTriggered = true;
+            finalMessage += `⚠️ *OFFICIAL WARNINGS:*\n`;
             
-            // POP is Probability of Precipitation (0.0 to 1.0)
-            // Multiply by 100 to get a percentage
-            const rainChance = Math.round((forecast.pop || 0) * 100); 
-            
-            const time = new Date(forecast.dt * 1000).toLocaleString('en-IN', { 
-                timeZone: 'Asia/Kolkata',
-                weekday: 'short', 
-                hour: '2-digit', 
-                minute: '2-digit' 
+            data.alerts.alert.forEach(alert => {
+                // Get the event name (e.g., "Yellow Watch for Lightning")
+                finalMessage += `• *${alert.event}*\n`;
             });
+            finalMessage += `\n`;
+        }
 
-            // TRIGGER IF: Weather ID is rain/storm OR Rain Chance is 30% or higher
-            if (weatherId < 800 || rainChance >= 30) {
+        // 2. CHECK THE NEXT 12 HOURS FOR RAIN/STORMS
+        const currentEpoch = Math.floor(Date.now() / 1000);
+        let upcomingRain = false;
+        let rainMsg = `🌧️ *Upcoming Conditions:*\n`;
+
+        // Combine hours from today and tomorrow to safely look 12 hours ahead
+        const allHours = [...data.forecast.forecastday[0].hour, ...data.forecast.forecastday[1].hour];
+        const futureHours = allHours.filter(h => h.time_epoch > currentEpoch).slice(0, 12);
+
+        for (const hour of futureHours) {
+            const rainChance = hour.chance_of_rain;
+            const condition = hour.condition.text.toLowerCase();
+            
+            // Trigger if Rain Chance is >= 30% OR condition mentions rain/thunder
+            if (rainChance >= 30 || condition.includes("rain") || condition.includes("thunder")) {
+                upcomingRain = true;
                 alertTriggered = true;
-                alertMessage += `• ${time}: ⚠️ *${weatherDesc.toUpperCase()}* (Rain Chance: ${rainChance}%)\n`;
+                
+                const timeString = new Date(hour.time_epoch * 1000).toLocaleString('en-IN', { 
+                    timeZone: 'Asia/Kolkata', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+                rainMsg += `• ${timeString}: ${hour.condition.text} (Rain Chance: ${rainChance}%)\n`;
             }
         }
 
-        if (alertTriggered) {
-            const currentTemp = upcomingForecasts[0].main.temp;
-            const finalMessage = `🚨 *Weather Alert: Bikrampur, Bankura* 🚨\n\nConditions expected:\n${alertMessage}\n🌡️ Current Temp: ${currentTemp}°C\n\n_Stay safe!_`;
+        if (upcomingRain) {
+            finalMessage += rainMsg;
+        }
 
+        // SEND THE ALERT TO TELEGRAM
+        if (alertTriggered) {
+            finalMessage += `\n🌡️ Current Temp: ${data.current.temp_c}°C\n_Stay safe!_`;
             await sendTelegramMessage(finalMessage);
             console.log("Alert sent successfully.");
         } else {
-            // IT IS NOW SILENT AGAIN. No spam!
             console.log("Weather is clear. No alert needed.");
         }
 
