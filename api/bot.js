@@ -22,21 +22,37 @@ export default async function handler(req, res) {
                 const response = await fetch(url);
                 const data = await response.json();
                 
-                const temp = data.current.temp_c;
-                const condition = data.current.condition.text;
-                const wind = data.current.wind_kph; // WeatherAPI gives wind in km/h automatically
+                const current = data.current;
+                const temp = current.temp_c;
+                const feelsLike = current.feelslike_c;
+                const condition = current.condition.text;
+                const wind = current.wind_kph;
+                const gust = current.gust_kph; // Advanced: Wind Gusts
+                const humidity = current.humidity; // Advanced: Humidity
+                const pressure = current.pressure_mb; // Advanced: Pressure
+                const cloudCover = current.cloud; // Advanced: Cloud coverage %
+                const vis = current.vis_km; // Advanced: Visibility
                 const rainChance = data.forecast.forecastday[0].day.daily_chance_of_rain;
                 
-                let replyText = `📍 *Bikrampur Weather Outlook:*\n🌡️ Temp: ${temp}°C\n☁️ Condition: ${condition.toUpperCase()}\n🌧️ Today's Rain Chance: ${rainChance}%\n💨 Wind: ${wind} km/h\n`;
+                let replyText = `📍 *Advanced Weather: Bikrampur*\n`;
+                replyText += `──────────────────\n`;
+                replyText += `🌡️ *Temp:* ${temp}°C (Feels like ${feelsLike}°C)\n`;
+                replyText += `☁️ *Condition:* ${condition.toUpperCase()} (${cloudCover}% Cloud Cover)\n`;
+                replyText += `🌧️ *Rain Chance:* ${rainChance}%\n`;
+                replyText += `💨 *Wind:* ${wind} km/h | *Gusts up to:* ${gust} km/h\n`;
+                replyText += `💧 *Humidity:* ${humidity}%\n`;
+                replyText += `⏱️ *Pressure:* ${pressure} mb\n`;
+                replyText += `👁️ *Visibility:* ${vis} km\n`;
+                replyText += `──────────────────\n`;
 
                 // Add official alerts to the command reply if they exist
                 if (data.alerts && data.alerts.alert && data.alerts.alert.length > 0) {
-                    replyText += `\n⚠️ *ACTIVE ALERTS:*\n`;
+                    replyText += `⚠️ *ACTIVE ALERTS:*\n`;
                     data.alerts.alert.forEach(alert => {
                         replyText += `• ${alert.event}\n`;
                     });
                 } else {
-                    replyText += `\n✅ No official warnings active.`;
+                    replyText += `✅ No official government warnings active.`;
                 }
 
                 await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -57,4 +73,3 @@ export default async function handler(req, res) {
     
     return res.status(200).send('OK');
 }
-
