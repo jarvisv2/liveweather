@@ -17,7 +17,7 @@ async function checkWeather() {
         }
 
         let alertTriggered = false;
-        let finalMessage = `🚨 *Weather Alert: Bikrampur, Bankura* 🚨\n\n`;
+        let finalMessage = `🚨 *Advanced Weather Alert: Bikrampur* 🚨\n\n`;
 
         // 1. CHECK FOR OFFICIAL GOVERNMENT ALERTS (IMD / SDMA)
         if (data.alerts && data.alerts.alert && data.alerts.alert.length > 0) {
@@ -25,16 +25,15 @@ async function checkWeather() {
             finalMessage += `⚠️ *OFFICIAL WARNINGS:*\n`;
             
             data.alerts.alert.forEach(alert => {
-                // Get the event name (e.g., "Yellow Watch for Lightning")
                 finalMessage += `• *${alert.event}*\n`;
             });
             finalMessage += `\n`;
         }
 
-        // 2. CHECK THE NEXT 12 HOURS FOR RAIN/STORMS
+        // 2. CHECK THE NEXT 12 HOURS FOR SEVERE HAZARDS
         const currentEpoch = Math.floor(Date.now() / 1000);
-        let upcomingRain = false;
-        let rainMsg = `🌧️ *Upcoming Conditions:*\n`;
+        let upcomingHazards = false;
+        let hazardMsg = `⚠️ *Upcoming Hazards Detected:*\n`;
 
         // Combine hours from today and tomorrow to safely look 12 hours ahead
         const allHours = [...data.forecast.forecastday[0].hour, ...data.forecast.forecastday[1].hour];
@@ -43,10 +42,12 @@ async function checkWeather() {
         for (const hour of futureHours) {
             const rainChance = hour.chance_of_rain;
             const condition = hour.condition.text.toLowerCase();
+            const gust = hour.gust_kph; // Track upcoming wind gusts
+            const cloudCover = hour.cloud;
             
-            // Trigger if Rain Chance is >= 30% OR condition mentions rain/thunder
-            if (rainChance >= 30 || condition.includes("rain") || condition.includes("thunder")) {
-                upcomingRain = true;
+            // Trigger if Rain Chance >= 30%, mentions rain/thunder, OR Wind Gusts >= 40 km/h
+            if (rainChance >= 30 || condition.includes("rain") || condition.includes("thunder") || gust >= 40) {
+                upcomingHazards = true;
                 alertTriggered = true;
                 
                 const timeString = new Date(hour.time_epoch * 1000).toLocaleString('en-IN', { 
@@ -54,17 +55,23 @@ async function checkWeather() {
                     hour: '2-digit', 
                     minute: '2-digit' 
                 });
-                rainMsg += `• ${timeString}: ${hour.condition.text} (Rain Chance: ${rainChance}%)\n`;
+                
+                hazardMsg += `• *${timeString}:* ${hour.condition.text}\n`;
+                
+                // Add advanced details below the trigger time
+                if (rainChance >= 30) hazardMsg += `  ↳ 🌧️ Rain Chance: ${rainChance}%\n`;
+                if (gust >= 40) hazardMsg += `  ↳ 💨 Dangerous Wind Gusts: ${gust} km/h\n`;
+                if (cloudCover >= 80) hazardMsg += `  ↳ ☁️ Heavy Cloud Cover: ${cloudCover}%\n`;
             }
         }
 
-        if (upcomingRain) {
-            finalMessage += rainMsg;
+        if (upcomingHazards) {
+            finalMessage += hazardMsg;
         }
 
-        // SEND THE ALERT TO TELEGRAM
+        // SEND THE ALERT TO TELEGRAM WITH CURRENT ADVANCED DATA
         if (alertTriggered) {
-            finalMessage += `\n🌡️ Current Temp: ${data.current.temp_c}°C\n_Stay safe!_`;
+            finalMessage += `\n📊 *Live Data:* Temp: ${data.current.temp_c}°C | Pressure: ${data.current.pressure_mb} mb | Humidity: ${data.current.humidity}%\n_Stay safe!_`;
             await sendTelegramMessage(finalMessage);
             console.log("Alert sent successfully.");
         } else {
