@@ -1,95 +1,84 @@
-const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-const LAT = '22.9238'; 
-const LON = '87.0427';
-// days=2 so we can look ahead into tomorrow, alerts=yes grabs government warnings
-const URL = `https://api.weatherapi.com/v1/forecast.json?key=${WEATHER_API_KEY}&q=${LAT},${LON}&days=2&alerts=yes`;
+// Your precise hometown coordinates
+const LAT = '22.892016';
+const LON = '87.052826';
+
+// Open-Meteo API URL with ECMWF/Regional models, tracking hourly variables up to 12 hours ahead
+const URL = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=temperature_2m,precipitation_probability,weather_code,wind_gusts_10m&timezone=Asia%2FKolkata&forecast_days=2`;
+
+// WMO Weather Codes mapping for storms/heavy rain
+function getWeatherDescription(code) {
+    if (code === 95) return "Thunderstorm (Slight/Moderate)";
+    if (code === 96 || code === 99) return "⚡ SEVERE THUNDERSTORM WITH HAIL";
+    if (code >= 61 && code <= 65) return "Rain (Slight/Heavy)";
+    if (code >= 80 && code <= 82) return "Rain Showers";
+    return "Unsettled Weather";
+}
 
 async function checkWeather() {
     try {
         const response = await fetch(URL);
         const data = await response.json();
 
-        if (data.error) {
-            throw new Error(data.error.message);
+        if (!data.hourly) {
+            throw new Error("Failed to fetch data from Open-Meteo");
         }
 
+        const now = new Date();
         let alertTriggered = false;
-        let finalMessage = `🚨 *Severe Weather Alert: Bikrampur* 🚨\n\n`;
+        let finalMessage = `🚨 *Hometown Weather Alert* 🚨\n\n`;
+        let hazardMsg = `⚠️ *High-Confidence Hazards Detected:*\n`;
 
-        // 1. CHECK FOR OFFICIAL GOVERNMENT ALERTS (IMD / SDMA)
-        if (data.alerts && data.alerts.alert && data.alerts.alert.length > 0) {
-            alertTriggered = true;
-            finalMessage += `⚠️ *OFFICIAL WARNINGS:*\n`;
-            
-            data.alerts.alert.forEach(alert => {
-                finalMessage += `• *${alert.event}*\n`;
-            });
-            finalMessage += `\n`;
-        }
+        // Check the next 12 hours
+        for (let i = 0; i < 12; i++) {
+            const timeStr = data.hourly.time[i];
+            const forecastTime = new Date(timeStr);
 
-        // 2. CHECK THE NEXT 12 HOURS WITH HIGH-CONFIDENCE STRICT PARAMETERS
-        const currentEpoch = Math.floor(Date.now() / 1000);
-        let upcomingHazards = false;
-        let hazardMsg = `⚠️ *Upcoming Heavy Hazards Detected:*\n`;
+            // Only check future hours
+            if (forecastTime > now) {
+                const temp = data.hourly.temperature_2m[i];
+                const rainChance = data.hourly.precipitation_probability[i];
+                const code = data.hourly.weather_code[i];
+                const gust = data.hourly.wind_gusts_10m[i];
 
-        // Combine hours from today and tomorrow to safely look 12 hours ahead
-        const allHours = [...data.forecast.forecastday[0].hour, ...data.forecast.forecastday[1].hour];
-        const futureHours = allHours.filter(h => h.time_epoch > currentEpoch).slice(0, 12);
+                // Strict Thresholds: Real Rain Chance >= 75% OR direct Thunderstorm codes (95, 96, 99) OR violent wind gusts >= 50 km/h
+                const isHeavyRain = rainChance >= 75;
+                const isThunderstorm = (code === 95 || code === 96 || code === 99);
+                const isHighWind = gust >= 50;
 
-        for (const hour of futureHours) {
-            const rainChance = hour.chance_of_rain;
-            const condition = hour.condition.text.toLowerCase();
-            const gust = hour.gust_kph;
-            const cloudCover = hour.cloud;
-            
-            // --- THE NEW STRICT PARAMETERS ---
-            // 1. Rain chance must be 80% or higher
-            const isHeavyRain = rainChance >= 80;
-            // 2. Must predict thunder AND have at least a 70% chance of rain
-            const isDefiniteStorm = condition.includes("thunder") && rainChance >= 70;
-            // 3. Extremely dangerous winds (55+ km/h)
-            const isSevereWind = gust >= 55;
+                if (isHeavyRain || isThunderstorm || isHighWind) {
+                    alertTriggered = true;
+                    
+                    const formattedTime = forecastTime.toLocaleString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
 
-            if (isHeavyRain || isDefiniteStorm || isSevereWind) {
-                upcomingHazards = true;
-                alertTriggered = true;
-                
-                // Formatted with exact Day, Date, and Time
-                const timeString = new Date(hour.time_epoch * 1000).toLocaleString('en-IN', { 
-                    timeZone: 'Asia/Kolkata', 
-                    weekday: 'short',
-                    day: '2-digit',
-                    month: 'short',
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                });
-                
-                hazardMsg += `• *${timeString}:* ${hour.condition.text}\n`;
-                
-                if (isHeavyRain || isDefiniteStorm) hazardMsg += `  ↳ 🌧️ Rain Chance: ${rainChance}%\n`;
-                if (isSevereWind) hazardMsg += `  ↳ 💨 Dangerous Wind Gusts: ${gust} km/h\n`;
-                if (cloudCover >= 80) hazardMsg += `  ↳ ☁️ Heavy Cloud Cover: ${cloudCover}%\n`;
+                    const desc = getWeatherDescription(code);
+                    hazardMsg += `• *${formattedTime}:* ${desc}\n`;
+                    if (rainChance > 0) hazardMsg += `  ↳ 🌧️ Rain Chance: ${rainChance}%\n`;
+                    if (gust > 0) hazardMsg += `  ↳ 💨 Predicted Gusts: ${Math.round(gust)} km/h\n`;
+                    hazardMsg += `  ↳ 🌡️ Temp: ${temp}°C\n`;
+                }
             }
         }
 
-        if (upcomingHazards) {
-            finalMessage += hazardMsg;
-        }
-
-        // SEND THE ALERT TO TELEGRAM WITH CURRENT ADVANCED DATA
         if (alertTriggered) {
-            finalMessage += `\n📊 *Live Data:* Temp: ${data.current.temp_c}°C | Pressure: ${data.current.pressure_mb} mb\n_Stay safe!_`;
+            finalMessage += hazardMsg + `\n_Stay safe!_`;
             await sendTelegramMessage(finalMessage);
             console.log("Alert sent successfully.");
         } else {
-            console.log("Weather is clear or below threshold. No alert needed.");
+            console.log("Weather is stable. No alerts issued.");
         }
 
     } catch (error) {
-        console.error("Error checking weather:", error);
+        console.error("Error executing background check:", error);
     }
 }
 
@@ -107,3 +96,4 @@ async function sendTelegramMessage(text) {
 }
 
 checkWeather();
+
