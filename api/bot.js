@@ -5,7 +5,6 @@ export default async function handler(req, res) {
     }
 
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
     const body = req.body;
 
     if (body.message && body.message.text) {
@@ -13,47 +12,52 @@ export default async function handler(req, res) {
         const chatId = body.message.chat.id;
 
         if (text.startsWith('/weather')) {
-            const LAT = '22.9238'; 
-            const LON = '87.0427';
-            // alerts=yes pulls active government data
-            const url = `https://api.weatherapi.com/v1/forecast.json?key=${WEATHER_API_KEY}&q=${LAT},${LON}&days=1&alerts=yes`;
+            const LAT = '22.892016';
+            const LON = '87.052826';
+            
+            // Open-Meteo Current + Hourly query
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,surface_pressure,wind_speed_10m,wind_gusts_10m&hourly=precipitation_probability&timezone=Asia%2FKolkata&forecast_days=1`;
 
             try {
                 const response = await fetch(url);
                 const data = await response.json();
-                
+
+                if (!data.current) {
+                    throw new Error("Invalid Open-Meteo response");
+                }
+
                 const current = data.current;
-                const temp = current.temp_c;
-                const feelsLike = current.feelslike_c;
-                const condition = current.condition.text;
-                const wind = current.wind_kph;
-                const gust = current.gust_kph; // Advanced: Wind Gusts
-                const humidity = current.humidity; // Advanced: Humidity
-                const pressure = current.pressure_mb; // Advanced: Pressure
-                const cloudCover = current.cloud; // Advanced: Cloud coverage %
-                const vis = current.vis_km; // Advanced: Visibility
-                const rainChance = data.forecast.forecastday[0].day.daily_chance_of_rain;
-                
-                let replyText = `📍 *Advanced Weather: Bikrampur*\n`;
+                const temp = current.temperature_2m;
+                const feelsLike = current.apparent_temperature;
+                const humidity = current.relative_humidity_2m;
+                const pressure = Math.round(current.surface_pressure);
+                const wind = Math.round(current.wind_speed_10m);
+                const gust = Math.round(current.wind_gusts_10m);
+                const code = current.weather_code;
+
+                // Simple interpretation of current WMO weather codes
+                let condition = "Clear/Sunny";
+                if (code >= 1 && code <= 3) condition = "Partly Cloudy";
+                else if (code >= 45 && code <= 48) condition = "Hazy/Foggy";
+                else if (code >= 51 && code <= 65) condition = "Raining";
+                else if (code >= 80 && code <= 82) condition = "Rain Showers";
+                else if (code === 95) condition = "Thunderstorm Possible";
+                else if (code === 96 || code === 99) condition = "⚠️ Severe Thunderstorm";
+
+                // Grab the maximum rain probability over the next 3 hours
+                const futureChances = data.hourly.precipitation_probability.slice(0, 3);
+                const maxRainChance = Math.max(...futureChances);
+
+                let replyText = `📍 *Hometown Dashboard (Pinpoint)*\n`;
                 replyText += `──────────────────\n`;
                 replyText += `🌡️ *Temp:* ${temp}°C (Feels like ${feelsLike}°C)\n`;
-                replyText += `☁️ *Condition:* ${condition.toUpperCase()} (${cloudCover}% Cloud Cover)\n`;
-                replyText += `🌧️ *Rain Chance:* ${rainChance}%\n`;
-                replyText += `💨 *Wind:* ${wind} km/h | *Gusts up to:* ${gust} km/h\n`;
+                replyText += `☁️ *Condition:* ${condition.toUpperCase()}\n`;
+                replyText += `🌧️ *Next 3-Hr Rain Max:* ${maxRainChance}%\n`;
+                replyText += `💨 *Wind:* ${wind} km/h | *Gusts:* ${gust} km/h\n`;
                 replyText += `💧 *Humidity:* ${humidity}%\n`;
                 replyText += `⏱️ *Pressure:* ${pressure} mb\n`;
-                replyText += `👁️ *Visibility:* ${vis} km\n`;
                 replyText += `──────────────────\n`;
-
-                // Add official alerts to the command reply if they exist
-                if (data.alerts && data.alerts.alert && data.alerts.alert.length > 0) {
-                    replyText += `⚠️ *ACTIVE ALERTS:*\n`;
-                    data.alerts.alert.forEach(alert => {
-                        replyText += `• ${alert.event}\n`;
-                    });
-                } else {
-                    replyText += `✅ No official government warnings active.`;
-                }
+                replyText += `📊 _Data Source: ECMWF Scientific Model_`;
 
                 await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
@@ -66,10 +70,10 @@ export default async function handler(req, res) {
                 });
 
             } catch (error) {
-                console.error("Error:", error);
+                console.error("Error executing live command:", error);
             }
         }
     }
-    
+
     return res.status(200).send('OK');
 }
