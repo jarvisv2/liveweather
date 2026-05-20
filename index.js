@@ -17,7 +17,7 @@ async function checkWeather() {
         }
 
         let alertTriggered = false;
-        let finalMessage = `🚨 *Advanced Weather Alert: Bikrampur* 🚨\n\n`;
+        let finalMessage = `🚨 *Severe Weather Alert: Bikrampur* 🚨\n\n`;
 
         // 1. CHECK FOR OFFICIAL GOVERNMENT ALERTS (IMD / SDMA)
         if (data.alerts && data.alerts.alert && data.alerts.alert.length > 0) {
@@ -30,10 +30,10 @@ async function checkWeather() {
             finalMessage += `\n`;
         }
 
-        // 2. CHECK THE NEXT 12 HOURS FOR SEVERE HAZARDS
+        // 2. CHECK THE NEXT 12 HOURS WITH HIGH-CONFIDENCE STRICT PARAMETERS
         const currentEpoch = Math.floor(Date.now() / 1000);
         let upcomingHazards = false;
-        let hazardMsg = `⚠️ *Upcoming Hazards Detected:*\n`;
+        let hazardMsg = `⚠️ *Upcoming Heavy Hazards Detected:*\n`;
 
         // Combine hours from today and tomorrow to safely look 12 hours ahead
         const allHours = [...data.forecast.forecastday[0].hour, ...data.forecast.forecastday[1].hour];
@@ -42,25 +42,35 @@ async function checkWeather() {
         for (const hour of futureHours) {
             const rainChance = hour.chance_of_rain;
             const condition = hour.condition.text.toLowerCase();
-            const gust = hour.gust_kph; // Track upcoming wind gusts
+            const gust = hour.gust_kph;
             const cloudCover = hour.cloud;
             
-            // Trigger if Rain Chance >= 30%, mentions rain/thunder, OR Wind Gusts >= 40 km/h
-            if (rainChance >= 30 || condition.includes("rain") || condition.includes("thunder") || gust >= 40) {
+            // --- THE NEW STRICT PARAMETERS ---
+            // 1. Rain chance must be 80% or higher
+            const isHeavyRain = rainChance >= 80;
+            // 2. Must predict thunder AND have at least a 70% chance of rain
+            const isDefiniteStorm = condition.includes("thunder") && rainChance >= 70;
+            // 3. Extremely dangerous winds (55+ km/h)
+            const isSevereWind = gust >= 55;
+
+            if (isHeavyRain || isDefiniteStorm || isSevereWind) {
                 upcomingHazards = true;
                 alertTriggered = true;
                 
+                // Formatted with exact Day, Date, and Time
                 const timeString = new Date(hour.time_epoch * 1000).toLocaleString('en-IN', { 
                     timeZone: 'Asia/Kolkata', 
+                    weekday: 'short',
+                    day: '2-digit',
+                    month: 'short',
                     hour: '2-digit', 
                     minute: '2-digit' 
                 });
                 
                 hazardMsg += `• *${timeString}:* ${hour.condition.text}\n`;
                 
-                // Add advanced details below the trigger time
-                if (rainChance >= 30) hazardMsg += `  ↳ 🌧️ Rain Chance: ${rainChance}%\n`;
-                if (gust >= 40) hazardMsg += `  ↳ 💨 Dangerous Wind Gusts: ${gust} km/h\n`;
+                if (isHeavyRain || isDefiniteStorm) hazardMsg += `  ↳ 🌧️ Rain Chance: ${rainChance}%\n`;
+                if (isSevereWind) hazardMsg += `  ↳ 💨 Dangerous Wind Gusts: ${gust} km/h\n`;
                 if (cloudCover >= 80) hazardMsg += `  ↳ ☁️ Heavy Cloud Cover: ${cloudCover}%\n`;
             }
         }
@@ -71,11 +81,11 @@ async function checkWeather() {
 
         // SEND THE ALERT TO TELEGRAM WITH CURRENT ADVANCED DATA
         if (alertTriggered) {
-            finalMessage += `\n📊 *Live Data:* Temp: ${data.current.temp_c}°C | Pressure: ${data.current.pressure_mb} mb | Humidity: ${data.current.humidity}%\n_Stay safe!_`;
+            finalMessage += `\n📊 *Live Data:* Temp: ${data.current.temp_c}°C | Pressure: ${data.current.pressure_mb} mb\n_Stay safe!_`;
             await sendTelegramMessage(finalMessage);
             console.log("Alert sent successfully.");
         } else {
-            console.log("Weather is clear. No alert needed.");
+            console.log("Weather is clear or below threshold. No alert needed.");
         }
 
     } catch (error) {
