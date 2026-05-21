@@ -31,7 +31,7 @@ async function checkWeather() {
         let finalMessage = `🚨 *Hometown Weather Alert* 🚨\n\n`;
         let hazardMsg = `⚠️ *High-Confidence Hazards Detected:*\n`;
 
-        // Check the next 12 hours
+                // Check the next 12 hours
         for (let i = 0; i < 12; i++) {
             const timeStr = data.hourly.time[i];
             const forecastTime = new Date(timeStr);
@@ -43,9 +43,12 @@ async function checkWeather() {
                 const code = data.hourly.weather_code[i];
                 const gust = data.hourly.wind_gusts_10m[i];
 
-                // Strict Thresholds: Real Rain Chance >= 75% OR direct Thunderstorm codes (95, 96, 99) OR violent wind gusts >= 50 km/h
+                // --- THE NEW STRICT LOGIC ---
+                // 1. Heavy rain alone (>= 75%)
                 const isHeavyRain = rainChance >= 75;
-                const isThunderstorm = (code === 95 || code === 96 || code === 99);
+                // 2. Thunderstorms MUST have at least a 50% rain chance to filter out dry heat alarms
+                const isThunderstorm = (code === 95 || code === 96 || code === 99) && rainChance >= 50;
+                // 3. Violent wind gusts >= 50 km/h
                 const isHighWind = gust >= 50;
 
                 if (isHeavyRain || isThunderstorm || isHighWind) {
@@ -68,32 +71,3 @@ async function checkWeather() {
                 }
             }
         }
-
-        if (alertTriggered) {
-            finalMessage += hazardMsg + `\n_Stay safe!_`;
-            await sendTelegramMessage(finalMessage);
-            console.log("Alert sent successfully.");
-        } else {
-            console.log("Weather is stable. No alerts issued.");
-        }
-
-    } catch (error) {
-        console.error("Error executing background check:", error);
-    }
-}
-
-async function sendTelegramMessage(text) {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            chat_id: TELEGRAM_CHAT_ID,
-            text: text,
-            parse_mode: 'Markdown'
-        })
-    });
-}
-
-checkWeather();
-
