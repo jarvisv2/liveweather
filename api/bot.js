@@ -35,18 +35,27 @@ export default async function handler(req, res) {
                 const gust = Math.round(current.wind_gusts_10m);
                 const code = current.weather_code;
 
-                // Simple interpretation of current WMO weather codes
-                let condition = "Clear/Sunny";
-                if (code >= 1 && code <= 3) condition = "Partly Cloudy";
-                else if (code >= 45 && code <= 48) condition = "Hazy/Foggy";
-                else if (code >= 51 && code <= 65) condition = "Raining";
-                else if (code >= 80 && code <= 82) condition = "Rain Showers";
-                else if (code === 95) condition = "Thunderstorm Possible";
-                else if (code === 96 || code === 99) condition = "⚠️ Severe Thunderstorm";
-
-                // Grab the maximum rain probability over the next 3 hours
+                // Grab the maximum rain probability over the next 3 hours FIRST
                 const futureChances = data.hourly.precipitation_probability.slice(0, 3);
                 const maxRainChance = Math.max(...futureChances);
+
+                // STRICT LOGIC: Interpret conditions based on actual rain chances
+                let condition = "Clear / Sunny";
+                if (code >= 1 && code <= 3) condition = "Partly Cloudy";
+                else if (code >= 45 && code <= 48) condition = "Hazy / Foggy";
+                else if (code >= 51 && code <= 65) condition = "Raining";
+                else if (code >= 80 && code <= 82) condition = "Rain Showers";
+                
+                // If the model claims a thunderstorm (95, 96, 99)
+                else if (code === 95 || code === 96 || code === 99) {
+                    // Only display thunderstorm if there is a 50% or higher chance of actual rain
+                    if (maxRainChance >= 50) {
+                        condition = code === 95 ? "Thunderstorm Possible" : "⚠️ Severe Thunderstorm";
+                    } else {
+                        // If there is no rain expected, it is just a false alarm caused by extreme heat
+                        condition = "Clear / Sunny (Extreme Heat)";
+                    }
+                }
 
                 let replyText = `📍 *Hometown Dashboard (Pinpoint)*\n`;
                 replyText += `──────────────────\n`;
@@ -77,3 +86,4 @@ export default async function handler(req, res) {
 
     return res.status(200).send('OK');
 }
+
