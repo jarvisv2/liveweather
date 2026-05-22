@@ -15,8 +15,8 @@ export default async function handler(req, res) {
             const LAT = '22.892016';
             const LON = '87.052826';
             
-            // Open-Meteo Current + Hourly query
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,surface_pressure,wind_speed_10m,wind_gusts_10m&hourly=precipitation_probability&timezone=Asia%2FKolkata&forecast_days=1`;
+            // Added 'cloud_cover' to the API URL to get the exact cloud percentage
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,surface_pressure,wind_speed_10m,wind_gusts_10m,cloud_cover&hourly=precipitation_probability&timezone=Asia%2FKolkata&forecast_days=1`;
 
             try {
                 const response = await fetch(url);
@@ -34,33 +34,37 @@ export default async function handler(req, res) {
                 const wind = Math.round(current.wind_speed_10m);
                 const gust = Math.round(current.wind_gusts_10m);
                 const code = current.weather_code;
+                const cloudCover = current.cloud_cover; // Get real cloud data
 
-                // Grab the maximum rain probability over the next 3 hours FIRST
                 const futureChances = data.hourly.precipitation_probability.slice(0, 3);
                 const maxRainChance = Math.max(...futureChances);
 
-                // STRICT LOGIC: Interpret conditions based on actual rain chances
-                let condition = "Clear / Sunny";
-                if (code >= 1 && code <= 3) condition = "Partly Cloudy";
-                else if (code >= 45 && code <= 48) condition = "Hazy / Foggy";
+                // 1. Calculate actual sky visibility using Cloud Cover % first
+                let skyCondition = "Clear / Sunny";
+                if (cloudCover > 20 && cloudCover <= 50) skyCondition = "Mostly Sunny (Some Clouds)";
+                else if (cloudCover > 50 && cloudCover <= 80) skyCondition = "Partly Cloudy";
+                else if (cloudCover > 80) skyCondition = "Mostly Cloudy / Overcast";
+
+                // 2. Apply severe weather over the actual sky condition
+                let condition = skyCondition;
+                
+                if (code >= 45 && code <= 48) condition = "Hazy / Foggy";
                 else if (code >= 51 && code <= 65) condition = "Raining";
                 else if (code >= 80 && code <= 82) condition = "Rain Showers";
-                
-                // If the model claims a thunderstorm (95, 96, 99)
                 else if (code === 95 || code === 96 || code === 99) {
-                    // Only display thunderstorm if there is a 50% or higher chance of actual rain
                     if (maxRainChance >= 50) {
-                        condition = code === 95 ? "Thunderstorm Possible" : "⚠️ Severe Thunderstorm";
+                        condition = "⚠️ Thunderstorm Expected";
                     } else {
-                        // If there is no rain expected, it is just a false alarm caused by extreme heat
-                        condition = "Clear / Sunny (Extreme Heat)";
+                        // Instead of forcing "Sunny", append the heat warning to the ACTUAL cloud condition
+                        condition = `${skyCondition} (Extreme Heat)`;
                     }
                 }
 
                 let replyText = `📍 *Hometown Dashboard (Pinpoint)*\n`;
                 replyText += `──────────────────\n`;
                 replyText += `🌡️ *Temp:* ${temp}°C (Feels like ${feelsLike}°C)\n`;
-                replyText += `☁️ *Condition:* ${condition.toUpperCase()}\n`;
+                // Now displaying exactly what the clouds are doing
+                replyText += `☁️ *Condition:* ${condition.toUpperCase()} (${cloudCover}% Clouds)\n`;
                 replyText += `🌧️ *Next 3-Hr Rain Max:* ${maxRainChance}%\n`;
                 replyText += `💨 *Wind:* ${wind} km/h | *Gusts:* ${gust} km/h\n`;
                 replyText += `💧 *Humidity:* ${humidity}%\n`;
