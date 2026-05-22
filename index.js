@@ -4,185 +4,132 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const LAT = '22.892016';
 const LON = '87.052826';
 
-const URL = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=
-temperature_2m,
-relative_humidity_2m,
-dew_point_2m,
-apparent_temperature,
-precipitation_probability,
-precipitation,
-rain,
-showers,
-weather_code,
-cloud_cover,
-cloud_cover_low,
-cloud_cover_mid,
-cloud_cover_high,
-cape,
-lifted_index,
-convective_precipitation,
-surface_pressure,
-wind_speed_10m,
-wind_gusts_10m,
-visibility
-&models=ecmwf_seamless,gfs_seamless,icon_seamless
-&timezone=Asia%2FKolkata
-&forecast_days=2`;
+const URL =
+`https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,precipitation_probability,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,surface_pressure&timezone=Asia%2FKolkata&forecast_days=2`;
 
-function getWeatherDescription(code) {
-    if (code === 0) return "Clear Sky";
-    if (code <= 3) return "Cloudy";
-    if (code >= 45 && code <= 48) return "Fog";
-    if (code >= 51 && code <= 67) return "Rain";
-    if (code >= 71 && code <= 77) return "Snow";
-    if (code >= 80 && code <= 82) return "Rain Showers";
-    if (code === 95) return "Thunderstorm";
-    if (code === 96 || code === 99) return "Severe Thunderstorm";
-    return "Unstable Weather";
-}
-
-function calculateStormRisk(data, i) {
-    const rainChance = data.hourly.precipitation_probability[i] || 0;
-    const gust = data.hourly.wind_gusts_10m[i] || 0;
-    const cape = data.hourly.cape[i] || 0;
-    const lifted = data.hourly.lifted_index[i] || 0;
-    const humidity = data.hourly.relative_humidity_2m[i] || 0;
-    const cloud = data.hourly.cloud_cover[i] || 0;
-    const convective = data.hourly.convective_precipitation[i] || 0;
-    const visibility = data.hourly.visibility[i] || 10000;
+function getRisk(rain, gust, humidity, cloud) {
 
     let score = 0;
 
-    // Rain
-    if (rainChance >= 30) score += 10;
-    if (rainChance >= 50) score += 20;
-    if (rainChance >= 70) score += 30;
-    if (rainChance >= 85) score += 40;
+    if (rain >= 30) score += 20;
+    if (rain >= 50) score += 25;
+    if (rain >= 70) score += 30;
 
-    // CAPE
-    if (cape >= 500) score += 10;
-    if (cape >= 1200) score += 20;
-    if (cape >= 2500) score += 35;
+    if (gust >= 30) score += 15;
+    if (gust >= 50) score += 25;
 
-    // Lifted Index
-    if (lifted <= -2) score += 10;
-    if (lifted <= -4) score += 20;
-    if (lifted <= -6) score += 30;
+    if (humidity >= 80) score += 15;
 
-    // Humidity
-    if (humidity >= 70) score += 10;
-    if (humidity >= 85) score += 20;
+    if (cloud >= 80) score += 15;
 
-    // Wind Gust
-    if (gust >= 35) score += 10;
-    if (gust >= 50) score += 20;
-    if (gust >= 70) score += 35;
+    if (score >= 80)
+        return { level: "🔴 EXTREME", score };
 
-    // Convective Rain
-    if (convective >= 0.5) score += 15;
-    if (convective >= 2) score += 30;
+    if (score >= 60)
+        return { level: "🟠 SEVERE", score };
 
-    // Cloud
-    if (cloud >= 70) score += 10;
+    if (score >= 40)
+        return { level: "🟡 MODERATE", score };
 
-    // Low visibility
-    if (visibility <= 3000) score += 10;
-
-    if (score > 100) score = 100;
-
-    return score;
+    return { level: "🟢 LOW", score };
 }
 
-function getRiskLevel(score) {
-    if (score >= 85) return "🔴 EXTREME";
-    if (score >= 70) return "🟠 SEVERE";
-    if (score >= 50) return "🟡 MODERATE";
-    if (score >= 30) return "🟢 LOW";
-    return "⚪ MINIMAL";
-}
+async function sendTelegramMessage(text) {
 
-async function sendTelegramMessage(message) {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            chat_id: TELEGRAM_CHAT_ID,
-            text: message,
-            parse_mode: 'Markdown'
-        })
-    });
+    await fetch(
+        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text,
+                parse_mode: 'Markdown'
+            })
+        }
+    );
 }
 
 async function checkWeather() {
+
     try {
+
         const response = await fetch(URL);
         const data = await response.json();
 
         if (!data.hourly) {
-            throw new Error("Weather data unavailable");
+            throw new Error("Weather API failed");
         }
+
+        let message = `🚨 *Advanced Weather Monitor*\n\n`;
 
         const now = new Date();
 
-        let alertText = `🚨 *Advanced Storm Monitor*\n\n`;
-        let dangerFound = false;
+        let found = false;
 
-        for (let i = 0; i < 24; i++) {
+        for (let i = 0; i < 12; i++) {
 
-            const timeStr = data.hourly.time[i];
-            const forecastTime = new Date(timeStr);
+            const time = new Date(data.hourly.time[i]);
 
-            if (forecastTime <= now) continue;
+            if (time <= now)
+                continue;
 
-            const score = calculateStormRisk(data, i);
+            const rain =
+                data.hourly.precipitation_probability[i];
 
-            if (score < 40) continue;
+            const gust =
+                Math.round(data.hourly.wind_gusts_10m[i]);
 
-            dangerFound = true;
+            const humidity =
+                data.hourly.relative_humidity_2m[i];
 
-            const temp = data.hourly.temperature_2m[i];
-            const humidity = data.hourly.relative_humidity_2m[i];
-            const rainChance = data.hourly.precipitation_probability[i];
-            const gust = Math.round(data.hourly.wind_gusts_10m[i]);
-            const cape = Math.round(data.hourly.cape[i]);
-            const lifted = data.hourly.lifted_index[i];
-            const cloud = data.hourly.cloud_cover[i];
-            const code = data.hourly.weather_code[i];
+            const cloud =
+                data.hourly.cloud_cover[i];
 
-            const level = getRiskLevel(score);
+            const temp =
+                data.hourly.temperature_2m[i];
 
-            const formattedTime = forecastTime.toLocaleString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                weekday: 'short',
-                day: '2-digit',
-                month: 'short',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
+            const risk =
+                getRisk(rain, gust, humidity, cloud);
 
-            alertText += `━━━━━━━━━━━━━━\n`;
-            alertText += `⏰ *${formattedTime}*\n`;
-            alertText += `⚠️ *Risk:* ${level} (${score}%)\n`;
-            alertText += `🌦️ *Condition:* ${getWeatherDescription(code)}\n`;
-            alertText += `🌧️ *Rain Chance:* ${rainChance}%\n`;
-            alertText += `💨 *Wind Gust:* ${gust} km/h\n`;
-            alertText += `☁️ *Cloud Cover:* ${cloud}%\n`;
-            alertText += `💧 *Humidity:* ${humidity}%\n`;
-            alertText += `⚡ *CAPE:* ${cape}\n`;
-            alertText += `📉 *Lifted Index:* ${lifted}\n`;
-            alertText += `🌡️ *Temp:* ${temp}°C\n\n`;
+            if (risk.score < 40)
+                continue;
+
+            found = true;
+
+            const formatted =
+                time.toLocaleString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    weekday: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+            message += `━━━━━━━━━━\n`;
+            message += `⏰ *${formatted}*\n`;
+            message += `⚠️ *Risk:* ${risk.level} (${risk.score}%)\n`;
+            message += `🌧️ Rain: ${rain}%\n`;
+            message += `💨 Gusts: ${gust} km/h\n`;
+            message += `☁️ Clouds: ${cloud}%\n`;
+            message += `💧 Humidity: ${humidity}%\n`;
+            message += `🌡️ Temp: ${temp}°C\n\n`;
         }
 
-        if (dangerFound) {
-            await sendTelegramMessage(alertText);
+        if (found) {
+            await sendTelegramMessage(message);
         } else {
-            console.log("No dangerous weather detected.");
+            console.log("No severe weather.");
         }
 
-    } catch (error) {
-        console.error("Weather Error:", error);
+    } catch (err) {
+
+        console.error(err);
+
+        await sendTelegramMessage(
+            "❌ Weather monitor failed."
+        );
     }
 }
 
